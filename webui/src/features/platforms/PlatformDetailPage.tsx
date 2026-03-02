@@ -344,7 +344,7 @@ export function PlatformDetailPage() {
 
                   <div className="field-group">
                     <label className="field-label" htmlFor="detail-edit-miss-action">
-                      {t("反向代理未命中策略")}
+                      {t("反向代理账号解析出错策略")}
                     </label>
                     <Select id="detail-edit-miss-action" {...editForm.register("reverse_proxy_miss_action")}>
                       {missActions.map((item) => (

@@ -321,7 +321,7 @@ const EXACT_ZH_TO_EN: Record<string, string> = {
   "订阅配置": "Subscription configuration",
   "队列大小": "Queue size",
   "反向代理账号为空行为": "Reverse-proxy empty-account behavior",
-  "反向代理未命中策略": "Reverse proxy miss policy",
+  "反向代理账号解析出错策略": "Reverse proxy account parsing error policy",
   "用于提取 Account 的 Headers": "Headers used to extract Account",
   "用于提取 Account 的 Headers（每行一个）": "Headers used to extract Account (one per line)",
   "用于提取 Account 的 Headers 不能为空": "Headers used to extract Account cannot be empty",
