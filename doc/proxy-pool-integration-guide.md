@@ -248,9 +248,61 @@ curl "https://resin.pigll.site/my-token/./https/api.ipify.org"
 
 ---
 
-## 六、高级用法
+## 六、实战场景
 
-### 6.1 通过 Header 传递 Account（推荐生产环境）
+### 6.1 GPT / OpenAI 固定代理
+
+让所有 OpenAI API 请求走同一个美国 IP，避免频繁切换 IP 导致封号：
+
+```python
+from openai import OpenAI
+
+# 将 base_url 指向 Resin，Account 设为 "gpt" 绑定固定 IP
+client = OpenAI(
+    api_key="sk-xxx",
+    base_url="https://resin.pigll.site/my-token/US.gpt/https/api.openai.com/v1"
+)
+
+# 所有请求都会走同一个美国出口 IP（7 天内不变）
+resp = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+> 💡 Account 名称随意取，`gpt`、`openai_main`、`chatbot_prod` 都可以。
+> 不同 Account 会绑定不同的 IP，可以用来隔离不同业务。
+
+### 6.2 多店铺 / 多账号管理
+
+每个店铺绑定独立的固定 IP：
+
+```python
+# 店铺 A → 美国固定 IP
+resp_a = proxy_request("https://api.shop.com/orders", platform="US", account="shop_a")
+
+# 店铺 B → 美国固定 IP（和 A 不同）
+resp_b = proxy_request("https://api.shop.com/orders", platform="US", account="shop_b")
+
+# 店铺 C → 日本固定 IP
+resp_c = proxy_request("https://api.shop.com/orders", platform="JP", account="shop_c")
+```
+
+### 6.3 爬虫 / 数据采集（轮换 IP）
+
+不带 Account，每次请求自动换 IP，降低被封风险：
+
+```python
+for page in range(100):
+    # 每次请求走不同的 IP
+    resp = proxy_request(f"https://target-site.com/page/{page}", platform="US")
+```
+
+---
+
+## 七、高级用法
+
+### 7.1 通过 Header 传递 Account（推荐生产环境）
 
 使用 `X-Resin-Account` 请求头，代码更清晰，便于中间件统一处理：
 
@@ -263,7 +315,7 @@ resp = requests.get(
 
 优先级：`X-Resin-Account` Header > URL 中的 Account > Header 提取规则
 
-### 6.2 零侵入对接（Header 提取规则）
+### 7.2 零侵入对接（Header 提取规则）
 
 如果你的业务请求已经带有 `Authorization` 等头部，Resin 可以自动提取作为 Account：
 
@@ -272,13 +324,13 @@ resp = requests.get(
 
 这样即使 URL 不带 Account，Resin 也能自动从请求头识别身份并绑定固定 IP。
 
-### 6.3 调整 Sticky TTL
+### 7.3 调整 Sticky TTL
 
 默认绑定时长为 **7 天**，可在 **Platform 设置** 中修改 `sticky_ttl` 字段。例如设为 `30m`（30 分钟）、`1h`（1 小时）等。
 
 ---
 
-## 七、常见问题
+## 八、常见问题
 
 | 问题 | 答案 |
 |:---|:---|
