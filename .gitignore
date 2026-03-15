@@ -1,3 +1,5 @@
 /resin
 sing-box-reference
 .agents
+data/
+docker-compose.yml
