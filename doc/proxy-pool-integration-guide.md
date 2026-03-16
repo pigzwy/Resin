@@ -391,7 +391,76 @@ resp = requests.get(
 
 ---
 
-## 八、常见问题
+## 八、快速验证
+
+部署完成后，可通过以下命令快速验证 Resin 是否正常工作。将 `{Token}` 替换为你的 `RESIN_PROXY_TOKEN`。
+
+### 8.1 验证基本连通性
+
+```bash
+# 通过 Default 平台请求，返回出口 IP 即为成功
+curl "https://resin.pigll.site/{Token}/Default/https/api.ipify.org"
+# 预期输出: 103.197.71.113（一个代理节点的出口 IP）
+```
+
+### 8.2 验证 IP 轮换（不带 Account）
+
+连续请求两次，观察 IP 是否变化：
+
+```bash
+curl "https://resin.pigll.site/{Token}/Default/https/api.ipify.org"
+# 输出: 103.197.71.113
+
+curl "https://resin.pigll.site/{Token}/Default/https/api.ipify.org"
+# 输出: 103.62.49.154（IP 发生变化 ✅）
+```
+
+### 8.3 验证粘性代理（带 Account）
+
+连续请求两次，使用相同的 Account，观察 IP 是否保持一致：
+
+```bash
+curl "https://resin.pigll.site/{Token}/Default.test_user/https/api.ipify.org"
+# 输出: 103.62.49.178
+
+curl "https://resin.pigll.site/{Token}/Default.test_user/https/api.ipify.org"
+# 输出: 103.62.49.178（IP 保持不变 ✅）
+```
+
+### 8.4 验证指定 Platform（以 us 为例）
+
+```bash
+# 轮换 IP
+curl "https://resin.pigll.site/{Token}/us/https/api.ipify.org"
+# 输出: 23.184.88.83（美国 IP ✅）
+
+curl "https://resin.pigll.site/{Token}/us/https/api.ipify.org"
+# 输出: 47.147.26.75（IP 变化 ✅）
+
+# 粘性代理
+curl "https://resin.pigll.site/{Token}/us.test_user/https/api.ipify.org"
+# 输出: 209.141.45.134
+
+curl "https://resin.pigll.site/{Token}/us.test_user/https/api.ipify.org"
+# 输出: 209.141.45.134（IP 保持不变 ✅）
+```
+
+### 8.5 验证结果速查
+
+| 测试场景 | 预期行为 | 判断标准 |
+|:---|:---|:---|
+| Default 平台，无 Account | IP 轮换 | 多次请求返回不同 IP |
+| Default 平台，带 Account | IP 固定 | 多次请求返回相同 IP |
+| us 平台，无 Account | 美国 IP 轮换 | 返回美国 IP，多次请求 IP 不同 |
+| us 平台，带 Account | 美国 IP 固定 | 返回美国 IP，多次请求 IP 相同 |
+| Platform 名称不存在 | 返回错误 | 返回 `Platform not found` |
+| Token 错误 | 认证失败 | 返回 401 |
+
+> ⚠️ **注意**：Platform 名称**区分大小写**。例如面板中创建的是 `us`，请求中就必须写 `us`，写 `US` 会返回 `Platform not found`。
+
+---
+
+## 九、常见问题
 
 | 问题 | 答案 |
 |:---|:---|
