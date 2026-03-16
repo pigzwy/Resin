@@ -134,6 +134,58 @@ curl "https://resin.pigll.site/{Token}/GPT专线/https/api.openai.com/v1/chat/co
 | 只走某一个具体节点 | 名称正则填那个节点的关键词 |
 | 美国 + 日本混用 | 地区过滤填 `us` 和 `jp` |
 
+### 3.4 正则过滤规则写法（重要）
+
+正则过滤的匹配格式为 `订阅名/节点tag`。多行正则之间的关系是 **AND（全部匹配）**，不是 OR。
+
+**核心规则**：
+- **多行 = AND**（节点必须同时匹配所有行）
+- **同一行用 `|` = OR**（匹配任意一个即可）
+
+#### ❌ 错误写法（多行 OR 不生效）
+
+```
+webshare家宽/.*
+星云1/.*
+```
+
+这要求一个节点同时匹配两个正则，但节点不可能同时属于两个订阅 → **结果为 0 个节点**。
+
+#### ✅ 正确写法（多个订阅用 `|` 合并）
+
+```
+^(webshare家宽|星云1|宝可梦)/
+```
+
+#### ✅ 多个订阅 + 进一步筛选
+
+```
+^(webshare家宽|星云1|宝可梦)/
+美国
+```
+
+第一行选订阅范围（OR），第二行在范围内进一步筛选含「美国」关键字的节点（AND）。
+
+#### ✅ 混合筛选（部分订阅全选 + 部分订阅精选）
+
+```
+^(webshare家宽|星云1|宝可梦)/|^fafa/V1N \| US 
+```
+
+这会匹配：三个订阅的所有节点 + fafa 订阅中名字含 `V1N | US ` 的节点。
+
+> ⚠️ 节点名中的 `|` 是正则特殊字符，需要用 `\|` 转义。
+
+#### 常用写法速查
+
+| 需求 | 正则写法 |
+|:---|:---|
+| 单个订阅全部节点 | `^订阅名/` |
+| 多个订阅全部节点 | `^(订阅A\|订阅B\|订阅C)/` |
+| 多个订阅 + 关键字筛选 | 第一行 `^(订阅A\|订阅B)/`，第二行 `关键字` |
+| 多个订阅 + 多关键字 | 第一行 `^(订阅A\|订阅B)/`，第二行 `(关键字1\|关键字2)` |
+| 排除含特定关键字的节点 | 第一行 `^订阅名/`，第二行 `^(?!.*过期)` |
+
 ---
 
 ## 四、URL 格式详解
@@ -389,6 +441,80 @@ resp = requests.get(
 
 默认绑定时长为 **7 天**，可在 **Platform 设置** 中修改 `sticky_ttl` 字段。例如设为 `30m`（30 分钟）、`1h`（1 小时）等。
 
+### 7.4 正向代理模式（CONNECT 隧道，保留 TLS 指纹）
+
+Resin 除了反向代理（URL 改写）外，还支持**正向代理（HTTP CONNECT 隧道）**模式。两种模式的核心区别：
+
+| | 反向代理（URL 改写） | 正向代理（CONNECT 隧道） |
+|:---|:---|:---|
+| **TLS 处理** | Resin 终止 TLS，重新建连 | 透传隧道，保留客户端 TLS 指纹 |
+| **适合场景** | 纯 API 调用（不在意 TLS 指纹） | 需要 TLS 伪装的场景（如 curl_cffi） |
+| **认证格式** | URL 路径携带 Token | HTTP Proxy Auth：`Platform.Account:Token` |
+
+#### 为什么需要正向代理？
+
+反向代理模式下，Resin 会终止客户端的 TLS 连接并重新向目标建立新连接。如果目标网站（如 Cloudflare 保护的站点）检测 TLS 指纹，它看到的是 Resin 服务器的指纹而非客户端的 Chrome 指纹，可能导致 403 封禁。
+
+```
+反向代理（TLS 指纹丢失 ❌）：
+curl_cffi ──HTTPS──→ Resin ──新 TLS 连接──→ 目标站
+           TLS=Chrome        TLS=Resin(Go) → 被检测 → 403
+
+正向代理（TLS 指纹保留 ✅）：
+curl_cffi ──CONNECT 隧道──→ Resin ──TCP 透传──→ 目标站
+           TLS=Chrome 直达目标站 → 正常访问
+```
+
+#### 正向代理使用示例
+
+**cURL**：
+
+```bash
+curl -x http://{服务器IP}:{端口} \
+  -U "Default.user_tom:{Token}" \
+  https://api.ipify.org
+```
+
+**Python (curl_cffi)**：
+
+```python
+import curl_cffi.requests as requests
+
+resp = requests.get(
+    "https://auth.openai.com/authorize",
+    proxy="http://Default.user_tom:{Token}@{服务器IP}:{端口}",
+    impersonate="chrome",  # TLS 指纹完整保留到目标站 ✅
+)
+```
+
+**Python (requests)**：
+
+```python
+import requests
+
+proxies = {
+    "http": "http://Default.user_tom:{Token}@{服务器IP}:{端口}",
+    "https": "http://Default.user_tom:{Token}@{服务器IP}:{端口}",
+}
+resp = requests.get("https://api.ipify.org", proxies=proxies)
+```
+
+> ⚠️ 正向代理需要客户端能直接连接 Resin 的监听端口（默认 2260）。如果 Resin 前面有 CDN（如 Cloudflare），CDN 会拦截 CONNECT 请求，导致正向代理不可用。此时需要绕过 CDN 直连服务器 IP。
+
+### 7.5 推荐接入策略：混合模式
+
+根据业务场景选择最合适的代理模式：
+
+| 业务场景 | 推荐模式 | 原因 |
+|:---|:---|:---|
+| API 调用（OpenAI、商店 API 等） | 反向代理 | 简单易用，不需要 TLS 伪装 |
+| 账号注册/登录（Cloudflare 保护） | 正向代理 | 需要保留 TLS 指纹 |
+| 爬虫（普通网站） | 反向代理 | 简单高效 |
+| 爬虫（反爬严格的网站） | 正向代理 | 需要 TLS 指纹伪装 |
+| 浏览器自动化 | 正向代理 | 浏览器指纹需要保留 |
+
+两种模式可以**共用同一个 Resin 实例**，共享节点池和粘性路由。同一个 Account 在两种模式下绑定的是同一个出口 IP。
+
 ---
 
 ## 八、快速验证
@@ -460,13 +586,17 @@ curl "https://resin.pigll.site/{Token}/us.test_user/https/api.ipify.org"
 
 ---
 
-## 九、常见问题
+## 十、常见问题
 
 | 问题 | 答案 |
 |:---|:---|
-| Platform 名称写错会怎样？ | 返回错误，请确保名称和面板中创建的完全一致 |
+| Platform 名称写错会怎样？ | 返回 `Platform not found`，注意**区分大小写** |
 | Token 写错会怎样？ | 返回 401 认证失败 |
 | 节点全部故障了？ | Resin 返回错误，建议监控告警 |
 | 能同时用多个 Platform 吗？ | 每个请求只能指定一个 Platform |
 | Account 需要提前注册吗？ | 不需要，URL 里写什么就是什么 |
 | 固定 IP 的节点挂了？ | 自动切换到同 IP 的其他节点，没有则切到新节点 |
+| 正则写了多行，节点变成 0？ | 多行是 AND 关系，把多个条件用 `\|` 合并到一行 |
+| 反向代理访问 CF 保护站返回 403？ | Resin 会终止 TLS，TLS 指纹丢失。改用正向代理模式 |
+| 正向代理连不上？ | 检查是否经过了 CDN，CDN 不支持 CONNECT 隧道 |
+| 反向代理能代理 WebSocket 吗？ | 可以，协议字段仍填 `http`/`https`，Resin 自动升级 |
