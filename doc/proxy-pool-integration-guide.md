@@ -443,10 +443,11 @@ resp = requests.get(
 
 ### 7.4 正向代理模式（CONNECT 隧道，保留 TLS 指纹）
 
-Resin 除了反向代理（URL 改写）外，还支持**正向代理（HTTP CONNECT 隧道）**模式。两种模式的核心区别：
+Resin 除了反向代理（URL 改写）外，还支持**正向代理（HTTP CONNECT 隧道）**模式。
 
 | | 反向代理（URL 改写） | 正向代理（CONNECT 隧道） |
 |:---|:---|:---|
+| **地址** | `https://resin.pigll.site/{Token}/...` | `https://proxy.pigll.site:2261` |
 | **TLS 处理** | Resin 终止 TLS，重新建连 | 透传隧道，保留客户端 TLS 指纹 |
 | **适合场景** | 纯 API 调用（不在意 TLS 指纹） | 需要 TLS 伪装的场景（如 curl_cffi） |
 | **认证格式** | URL 路径携带 Token | HTTP Proxy Auth：`Platform.Account:Token` |
@@ -461,29 +462,33 @@ curl_cffi ──HTTPS──→ Resin ──新 TLS 连接──→ 目标站
            TLS=Chrome        TLS=Resin(Go) → 被检测 → 403
 
 正向代理（TLS 指纹保留 ✅）：
-curl_cffi ──CONNECT 隧道──→ Resin ──TCP 透传──→ 目标站
-           TLS=Chrome 直达目标站 → 正常访问
+curl_cffi ──HTTPS──→ stunnel ──CONNECT 隧道──→ Resin ──TCP 透传──→ 目标站
+           外层 TLS 加密（防 GFW）    内层 TLS=Chrome 直达目标站 → 正常访问
 ```
+
+> ⚠️ **重要：正向代理必须通过 HTTPS（端口 2261）访问**。如果使用明文 HTTP（端口 2260），CONNECT 请求中的目标域名对中间网络可见，可能在国内网络环境下被阻断。HTTPS 端口通过 stunnel 提供 TLS 封装，CONNECT 内容加密，不会被拦截。
 
 #### 正向代理使用示例
 
 **cURL**：
 
 ```bash
-curl -x http://{服务器IP}:{端口} \
-  -U "Default.user_tom:{Token}" \
+# HTTPS 正向代理（推荐，通过 stunnel TLS 加密）
+curl --proxy-insecure -x https://proxy.pigll.site:2261 \
+  -U "us.user_tom:{Token}" \
   https://api.ipify.org
 ```
 
-**Python (curl_cffi)**：
+**Python (curl_cffi，保留 TLS 指纹)**：
 
 ```python
 import curl_cffi.requests as requests
 
+# 注册/登录场景 - TLS 指纹完整保留
 resp = requests.get(
     "https://auth.openai.com/authorize",
-    proxy="http://Default.user_tom:{Token}@{服务器IP}:{端口}",
-    impersonate="chrome",  # TLS 指纹完整保留到目标站 ✅
+    proxy="https://us.user_tom:{Token}@proxy.pigll.site:2261",
+    impersonate="chrome",  # TLS 指纹直达目标站 ✅
 )
 ```
 
@@ -493,27 +498,36 @@ resp = requests.get(
 import requests
 
 proxies = {
-    "http": "http://Default.user_tom:{Token}@{服务器IP}:{端口}",
-    "https": "http://Default.user_tom:{Token}@{服务器IP}:{端口}",
+    "http": "https://us.user_tom:{Token}@proxy.pigll.site:2261",
+    "https": "https://us.user_tom:{Token}@proxy.pigll.site:2261",
 }
 resp = requests.get("https://api.ipify.org", proxies=proxies)
 ```
 
-> ⚠️ 正向代理需要客户端能直接连接 Resin 的监听端口（默认 2260）。如果 Resin 前面有 CDN（如 Cloudflare），CDN 会拦截 CONNECT 请求，导致正向代理不可用。此时需要绕过 CDN 直连服务器 IP。
+#### 正向代理认证格式
+
+代理用户名格式为 `{Platform}.{Account}`（或只写 `{Platform}`），密码为 Token：
+
+| 用户名 | 密码 | 效果 |
+|:---|:---|:---|
+| `us` | `{Token}` | 美国节点，轮换 IP |
+| `us.shop_01` | `{Token}` | 美国节点，shop_01 固定 IP |
+| `Default` | `{Token}` | 全部节点，轮换 IP |
+| `Default.tom` | `{Token}` | 全部节点，tom 固定 IP |
 
 ### 7.5 推荐接入策略：混合模式
 
 根据业务场景选择最合适的代理模式：
 
-| 业务场景 | 推荐模式 | 原因 |
+| 业务场景 | 推荐模式 | 代理地址 |
 |:---|:---|:---|
-| API 调用（OpenAI、商店 API 等） | 反向代理 | 简单易用，不需要 TLS 伪装 |
-| 账号注册/登录（Cloudflare 保护） | 正向代理 | 需要保留 TLS 指纹 |
-| 爬虫（普通网站） | 反向代理 | 简单高效 |
-| 爬虫（反爬严格的网站） | 正向代理 | 需要 TLS 指纹伪装 |
-| 浏览器自动化 | 正向代理 | 浏览器指纹需要保留 |
+| API 调用（OpenAI 等） | 反向代理 | `https://resin.pigll.site/{Token}/us/https/...` |
+| 账号注册/登录 | 正向代理 | `https://us.account:{Token}@proxy.pigll.site:2261` |
+| 付款（chatgpt.com） | 正向代理 | `https://us.account:{Token}@proxy.pigll.site:2261` |
+| 爬虫（普通网站） | 反向代理 | `https://resin.pigll.site/{Token}/./https/...` |
+| 爬虫（反爬严格） | 正向代理 | `https://us.account:{Token}@proxy.pigll.site:2261` |
 
-两种模式可以**共用同一个 Resin 实例**，共享节点池和粘性路由。同一个 Account 在两种模式下绑定的是同一个出口 IP。
+两种模式**共用同一个 Resin 实例**，共享节点池和粘性路由。同一个 Account 在两种模式下绑定的是同一个出口 IP。
 
 ---
 
