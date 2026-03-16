@@ -211,6 +211,9 @@ func LoadEnvConfig() (*EnvConfig, error) {
 		errs = append(errs, "RESIN_MAX_LATENCY_TABLE_ENTRIES must be <= 32")
 	}
 	validatePositive("RESIN_PROBE_CONCURRENCY", cfg.ProbeConcurrency, &errs)
+	if cfg.ProbeConcurrency > 10000 {
+		errs = append(errs, "RESIN_PROBE_CONCURRENCY must be <= 10000")
+	}
 	if _, err := cron.ParseStandard(cfg.GeoIPUpdateSchedule); err != nil {
 		errs = append(errs, fmt.Sprintf("RESIN_GEOIP_UPDATE_SCHEDULE: invalid cron expression %q: %v", cfg.GeoIPUpdateSchedule, err))
 	}

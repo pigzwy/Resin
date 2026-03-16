@@ -3,3 +3,5 @@ sing-box-reference
 .agents
 data/
 docker-compose.yml
+.devcontainer
+start-instance.sh

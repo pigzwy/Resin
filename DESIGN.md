@@ -386,9 +386,10 @@ Resin 使用计数器熔断机制保护系统稳定性。
     * 失败：调用 `RecordResult(false)` 与 `RecordLatency(..., nil)`。连续失败将导致节点熔断。
 
 #### 主动探测的并发控制
-ProbeManager 采用 **SPSC (Single Producer Single Consumer)** 变体模型进行调度：
-* **执行**：所有主动探测任务共享一个全局信号量（默认 1000 并发），异步执行。
-* **背压**：受限于信号量，当并发满载时，调度协程会阻塞等待，天然形成了背压，防止创建过多 goroutine。
+ProbeManager 采用 **双优先级队列 + 固定 worker 池** 的调度模型：
+* **执行**：定期扫描器只负责把待探测节点入队；固定数量 worker 异步消费并执行探测。
+* **优先级**：支持高/普通双队列。高队列非空时仍有 10% 概率抽取普通队列，避免普通任务长期饥饿。
+* **限流**：异步并发由 worker 数量决定；同步探测接口（需要立即返回结果）不走异步队列限流路径。
 
 ### 被动延迟探测
 
@@ -2244,7 +2245,7 @@ GeoIP 与订阅的下载都有错误重试的需求。
 
 核心设置：
 * `RESIN_MAX_LATENCY_TABLE_ENTRIES`：每个节点延迟表中“普通站点 LRU 区”的最大表项数。默认 12，最大 32（超限启动失败）。
-* `RESIN_PROBE_CONCURRENCY`：节点探测的最大并发数量，默认 1000。
+* `RESIN_PROBE_CONCURRENCY`：节点探测的最大并发数量。默认 1000，最大 10000（超限启动失败）。
 * `RESIN_GEOIP_UPDATE_SCHEDULE`：GeoIP 数据库自动更新的 Cron 表达式。默认 "0 7 * * *"。
 * `RESIN_DEFAULT_PLATFORM_STICKY_TTL`：默认平台粘性会话时长。默认 "168h"。
 * `RESIN_DEFAULT_PLATFORM_REGEX_FILTERS`：默认平台正则过滤器（JSON 字符串数组）。默认 `[]`。
