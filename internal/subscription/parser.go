@@ -1237,7 +1237,7 @@ func convertClashProxyToNode(proxy map[string]any) (ParsedNode, bool) {
 			"server_port": port,
 			"uuid":        uuid,
 		}
-		if flow := strings.TrimSpace(getString(proxy, "flow")); flow != "" {
+		if flow := normalizeVLESSFlow(getString(proxy, "flow")); flow != "" {
 			outbound["flow"] = flow
 		}
 		setTLSFromClash(outbound, proxy, "tls")
@@ -1769,6 +1769,18 @@ func normalizeHysteriaRate(raw string) string {
 		return value + " Mbps"
 	}
 	return value
+}
+
+func normalizeVLESSFlow(raw string) string {
+	flow := strings.TrimSpace(raw)
+	switch strings.ToLower(flow) {
+	case "", "none", "null":
+		return ""
+	case "xtls-rprx-vision":
+		return "xtls-rprx-vision"
+	default:
+		return ""
+	}
 }
 
 func normalizeShadowsocksMethod(raw string) string {
@@ -3112,7 +3124,7 @@ func parseVlessURI(uri string) (ParsedNode, bool) {
 		"server_port": port,
 		"uuid":        uuid,
 	}
-	if flow := strings.TrimSpace(query.Get("flow")); flow != "" {
+	if flow := normalizeVLESSFlow(query.Get("flow")); flow != "" {
 		outbound["flow"] = flow
 	}
 

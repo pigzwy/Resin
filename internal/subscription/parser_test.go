@@ -900,6 +900,37 @@ func TestParseGeneralSubscription_ClashJSON_VLESSRealityOpts(t *testing.T) {
 	}
 }
 
+func TestParseGeneralSubscription_ClashJSON_VLESSFlowNoneIgnored(t *testing.T) {
+	data := []byte(`{
+		"proxies": [
+			{
+				"name": "vless-none-flow",
+				"type": "vless",
+				"server": "203.0.113.20",
+				"port": 443,
+				"uuid": "11111111-2222-3333-4444-555555555556",
+				"tls": true,
+				"flow": "None",
+				"network": "tcp",
+				"servername": "example.com"
+			}
+		]
+	}`)
+
+	nodes, err := ParseGeneralSubscription(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 parsed node, got %d", len(nodes))
+	}
+
+	obj := parseNodeRaw(t, nodes[0].RawOptions)
+	if _, exists := obj["flow"]; exists {
+		t.Fatalf("flow should be omitted for placeholder value, got %v", obj["flow"])
+	}
+}
+
 func TestParseGeneralSubscription_ClashJSON_VLESSWSDropsALPN(t *testing.T) {
 	data := []byte(`{
 		"proxies": [
@@ -1070,6 +1101,25 @@ vless://26a1d547-b031-4139-9fc5-6671e1d0408a@example.com:443?type=tcp&security=t
 	second := parseNodeRaw(t, nodes[1].RawOptions)
 	if first["type"] != "trojan" || second["type"] != "vless" {
 		t.Fatalf("unexpected node types: %v, %v", first["type"], second["type"])
+	}
+}
+
+func TestParseGeneralSubscription_VLESSURIFlowNoneIgnored(t *testing.T) {
+	data := []byte(
+		"vless://11111111-2222-3333-4444-555555555557@example.com:443?type=tcp&security=tls&sni=example.com&flow=None",
+	)
+
+	nodes, err := ParseGeneralSubscription(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 parsed node, got %d", len(nodes))
+	}
+
+	obj := parseNodeRaw(t, nodes[0].RawOptions)
+	if _, exists := obj["flow"]; exists {
+		t.Fatalf("flow should be omitted for placeholder value, got %v", obj["flow"])
 	}
 }
 
