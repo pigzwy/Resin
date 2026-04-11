@@ -275,7 +275,9 @@ func TestRouteRequest_SameIPRotationMissRecreatesLease(t *testing.T) {
 		return NewPlatformRoutingState(), false
 	})
 
-	oldExpiry := time.Now().Add(time.Hour).UnixNano()
+	// Keep the old expiry intentionally different from StickyTTL so this
+	// recreation assertion does not depend on platform clock resolution.
+	oldExpiry := time.Now().Add(30 * time.Minute).UnixNano()
 	oldLease := Lease{
 		NodeHash:       currentHash,
 		EgressIP:       currentEntry.GetEgressIP(),

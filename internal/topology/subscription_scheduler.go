@@ -191,7 +191,7 @@ func (s *SubscriptionScheduler) runUpdatesWithWorkerLimit(subs []*subscription.S
 // applies the result under WithSubLock. This keeps the lock scope narrow
 // (no I/O under lock) while still preventing concurrent diff/apply races.
 func (s *SubscriptionScheduler) UpdateSubscription(sub *subscription.Subscription) {
-	attemptStartedNs := time.Now().UnixNano()
+	attemptSeq := sub.BeginRefreshAttempt()
 	attemptURL := sub.URL()
 	attemptSourceType := sub.SourceType()
 	attemptContent := sub.Content()
@@ -207,7 +207,7 @@ func (s *SubscriptionScheduler) UpdateSubscription(sub *subscription.Subscriptio
 	} else {
 		body, err = s.Fetcher(attemptURL)
 		if err != nil {
-			s.handleUpdateFailure(sub, attemptStartedNs, attemptConfigVersion, "fetch", err)
+			s.handleUpdateFailure(sub, attemptSeq, attemptConfigVersion, "fetch", err)
 			return
 		}
 	}
@@ -215,7 +215,7 @@ func (s *SubscriptionScheduler) UpdateSubscription(sub *subscription.Subscriptio
 	// 2. Parse (lock-free).
 	parsed, err := subscription.ParseGeneralSubscription(body)
 	if err != nil {
-		s.handleUpdateFailure(sub, attemptStartedNs, attemptConfigVersion, "parse", err)
+		s.handleUpdateFailure(sub, attemptSeq, attemptConfigVersion, "parse", err)
 		return
 	}
 
@@ -241,7 +241,7 @@ func (s *SubscriptionScheduler) UpdateSubscription(sub *subscription.Subscriptio
 		}
 		// Stale success guard: if a newer successful update has already landed,
 		// discard this older attempt to avoid rolling state backward.
-		if sub.LastUpdatedNs.Load() > attemptStartedNs {
+		if sub.LastSuccessAttemptSeq() > attemptSeq {
 			return
 		}
 
@@ -282,6 +282,7 @@ func (s *SubscriptionScheduler) UpdateSubscription(sub *subscription.Subscriptio
 		// 5. Update timestamps (inside lock, using current time).
 		now := time.Now().UnixNano()
 		sub.LastCheckedNs.Store(now)
+		sub.MarkSuccessAttemptSeq(attemptSeq)
 		sub.LastUpdatedNs.Store(now)
 		sub.SetLastError("")
 		applied = true
@@ -301,7 +302,7 @@ func (s *SubscriptionScheduler) UpdateSubscription(sub *subscription.Subscriptio
 // LastUpdatedNs stale-success guard).
 func (s *SubscriptionScheduler) handleUpdateFailure(
 	sub *subscription.Subscription,
-	attemptStartedNs int64,
+	attemptSeq int64,
 	attemptConfigVersion int64,
 	stage string,
 	err error,
@@ -312,7 +313,7 @@ func (s *SubscriptionScheduler) handleUpdateFailure(
 		if sub.ConfigVersion() != attemptConfigVersion {
 			return
 		}
-		if sub.LastUpdatedNs.Load() > attemptStartedNs {
+		if sub.LastSuccessAttemptSeq() > attemptSeq {
 			return
 		}
 		now := time.Now().UnixNano()

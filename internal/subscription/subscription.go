@@ -131,6 +131,12 @@ type Subscription struct {
 	LastCheckedNs atomic.Int64
 	LastUpdatedNs atomic.Int64
 	LastError     atomic.Pointer[string]
+	// refreshAttemptSeq assigns a monotonic sequence to each scheduler refresh
+	// attempt so stale-success protection does not depend on wall-clock precision.
+	refreshAttemptSeq atomic.Int64
+	// lastSuccessAttemptSeq records the latest successful refresh attempt applied
+	// to this subscription. Older attempts are ignored once a newer success lands.
+	lastSuccessAttemptSeq atomic.Int64
 
 	// managedNodes is the subscription's node view: Hash → ManagedNode.
 	// Swapped atomically on subscription update.
@@ -197,6 +203,21 @@ func (s *Subscription) Content() string {
 // ConfigVersion returns the scheduler input config version.
 func (s *Subscription) ConfigVersion() int64 {
 	return s.configVersion.Load()
+}
+
+// BeginRefreshAttempt returns a monotonic sequence for one scheduler refresh attempt.
+func (s *Subscription) BeginRefreshAttempt() int64 {
+	return s.refreshAttemptSeq.Add(1)
+}
+
+// LastSuccessAttemptSeq returns the sequence of the latest applied successful refresh.
+func (s *Subscription) LastSuccessAttemptSeq() int64 {
+	return s.lastSuccessAttemptSeq.Load()
+}
+
+// MarkSuccessAttemptSeq records the latest applied successful refresh sequence.
+func (s *Subscription) MarkSuccessAttemptSeq(seq int64) {
+	s.lastSuccessAttemptSeq.Store(seq)
 }
 
 // UpdateIntervalNs returns the configured update interval in nanoseconds (thread-safe).
