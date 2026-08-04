@@ -19,6 +19,13 @@ const (
 	SourceTypeLocal = "local"
 )
 
+const (
+	// UpdateModeReplace replaces current subscription nodes with refreshed content.
+	UpdateModeReplace = false
+	// UpdateModeIncrementalAlive keeps existing non-evicted nodes and merges refreshed content.
+	UpdateModeIncrementalAlive = true
+)
+
 // ManagedNode represents one hash entry in subscription managed nodes.
 type ManagedNode struct {
 	Tags    []string
@@ -114,10 +121,11 @@ type Subscription struct {
 	sourceType string
 	content    string
 	// updateIntervalNs is the configured subscription refresh interval.
-	updateIntervalNs int64
-	name             string
-	enabled          bool
-	ephemeral        bool
+	updateIntervalNs      int64
+	name                  string
+	enabled               bool
+	ephemeral             bool
+	incrementalAliveNodes bool
 	// ephemeralNodeEvictDelayNs is the per-subscription eviction delay for
 	// circuit-broken nodes when Ephemeral is enabled.
 	ephemeralNodeEvictDelayNs int64
@@ -131,12 +139,10 @@ type Subscription struct {
 	LastCheckedNs atomic.Int64
 	LastUpdatedNs atomic.Int64
 	LastError     atomic.Pointer[string]
-	// refreshAttemptSeq assigns a monotonic sequence to each scheduler refresh
-	// attempt so stale-success protection does not depend on wall-clock precision.
-	refreshAttemptSeq atomic.Int64
-	// lastSuccessAttemptSeq records the latest successful refresh attempt applied
-	// to this subscription. Older attempts are ignored once a newer success lands.
-	lastSuccessAttemptSeq atomic.Int64
+
+	// Scheduler sequencing for stale-attempt guards.
+	attemptSeq     atomic.Int64
+	lastAppliedSeq atomic.Int64
 
 	// managedNodes is the subscription's node view: Hash → ManagedNode.
 	// Swapped atomically on subscription update.
@@ -156,6 +162,7 @@ func NewSubscription(id, name, url string, enabled, ephemeral bool) *Subscriptio
 		name:                      name,
 		enabled:                   enabled,
 		ephemeral:                 ephemeral,
+		incrementalAliveNodes:     UpdateModeReplace,
 		ephemeralNodeEvictDelayNs: defaultEphemeralNodeEvictDelayNs,
 	}
 	empty := NewManagedNodes()
@@ -171,6 +178,15 @@ func (s *Subscription) SetLastError(err string) { s.LastError.Store(&err) }
 
 // GetLastError atomically loads the last error string.
 func (s *Subscription) GetLastError() string { return *s.LastError.Load() }
+
+// NextAttemptSeq returns a strictly increasing sequence for refresh attempts.
+func (s *Subscription) NextAttemptSeq() int64 { return s.attemptSeq.Add(1) }
+
+// LastAppliedSeq returns the latest applied refresh attempt sequence.
+func (s *Subscription) LastAppliedSeq() int64 { return s.lastAppliedSeq.Load() }
+
+// MarkAppliedAttempt records the latest applied refresh attempt sequence.
+func (s *Subscription) MarkAppliedAttempt(seq int64) { s.lastAppliedSeq.Store(seq) }
 
 // WithOpLock runs fn under the subscription operation lock.
 func (s *Subscription) WithOpLock(fn func()) {
@@ -203,21 +219,6 @@ func (s *Subscription) Content() string {
 // ConfigVersion returns the scheduler input config version.
 func (s *Subscription) ConfigVersion() int64 {
 	return s.configVersion.Load()
-}
-
-// BeginRefreshAttempt returns a monotonic sequence for one scheduler refresh attempt.
-func (s *Subscription) BeginRefreshAttempt() int64 {
-	return s.refreshAttemptSeq.Add(1)
-}
-
-// LastSuccessAttemptSeq returns the sequence of the latest applied successful refresh.
-func (s *Subscription) LastSuccessAttemptSeq() int64 {
-	return s.lastSuccessAttemptSeq.Load()
-}
-
-// MarkSuccessAttemptSeq records the latest applied successful refresh sequence.
-func (s *Subscription) MarkSuccessAttemptSeq(seq int64) {
-	s.lastSuccessAttemptSeq.Store(seq)
 }
 
 // UpdateIntervalNs returns the configured update interval in nanoseconds (thread-safe).
@@ -299,6 +300,20 @@ func (s *Subscription) Ephemeral() bool {
 func (s *Subscription) SetEphemeral(v bool) {
 	s.mu.Lock()
 	s.ephemeral = v
+	s.mu.Unlock()
+}
+
+// IncrementalAliveNodes returns whether refresh keeps existing non-evicted nodes (thread-safe).
+func (s *Subscription) IncrementalAliveNodes() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.incrementalAliveNodes
+}
+
+// SetIncrementalAliveNodes updates the refresh merge mode (thread-safe).
+func (s *Subscription) SetIncrementalAliveNodes(v bool) {
+	s.mu.Lock()
+	s.incrementalAliveNodes = v
 	s.mu.Unlock()
 }
 
