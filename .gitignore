@@ -6,6 +6,7 @@ data/
 docker-compose.yml
 .devcontainer
 start-instance.sh
+PublishToRegistry.sh
 
 # Claude Code / OMC tooling and local runtime data
 .claude/
